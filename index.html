@@ -134,6 +134,17 @@
       <p>&#128222; <span data-biz="phone">(208) 555-0147</span></p>
       <p style="margin-top:10px;color:var(--muted);font-size:14px">Evenings and weekends? Chat below &mdash; <span data-biz="host">Sofia</span> never misses a buyer.</p>
     </div>
+    <div class="card inbox-card"><h3>&#128203; Captured leads</h3>
+      <p>Curious what &ldquo;Saved to your dashboard&rdquo; actually looks like? This inbox preview shows every lead <span data-biz="host">Sofia</span> captures &mdash; stored in your browser&rsquo;s local storage only. Nothing here ever leaves this page.</p>
+      <button id="inbox-toggle" class="btn ghost" aria-expanded="false" aria-controls="inbox-panel">&#128203; View inbox <span id="inbox-count" class="inbox-count">0</span></button>
+    </div>
+  </div>
+  <div id="inbox-panel" class="inbox-panel" hidden>
+    <div class="inbox-head">
+      <b>&#128203; Captured leads inbox</b>
+      <span class="inbox-local">Browser-local preview &mdash; leads never leave this browser</span>
+    </div>
+    <div id="inbox-list" class="inbox-list"></div>
   </div>
 </div></section>
 
