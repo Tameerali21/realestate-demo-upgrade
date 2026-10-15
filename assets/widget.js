@@ -28,6 +28,11 @@
     document.querySelectorAll('[data-biz="city"]').forEach(function (el) { el.textContent = BIZ.city; });
     document.querySelectorAll('[data-biz="address"]').forEach(function (el) { el.textContent = BIZ.address; });
     document.querySelectorAll('[data-biz="phone"]').forEach(function (el) { el.textContent = BIZ.phone; });
+    /* tap-to-call binding (fleet standard, 2026-10-15): every tel: CTA follows ?phone=,
+       digits-only in the href so an injected param can't smuggle markup/JS. */
+    document.querySelectorAll('#call-cta, a[data-biz="phone"]').forEach(function (el) {
+      el.setAttribute('href', 'tel:' + String(BIZ.phone).replace(/[^+\d]/g, ''));
+    });
     document.querySelectorAll('[data-biz="host"]').forEach(function (el) { el.textContent = BIZ.host; });
     document.querySelectorAll('[data-biz="host-initial"]').forEach(function (el) { el.textContent = BIZ.host.charAt(0); });
     document.title = BIZ.name + ' — ' + BIZ.tagline + ' | ' + BIZ.city;
@@ -291,6 +296,13 @@
 
   function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
 
+  /* tap-to-call link for chat flows — href bound to ?phone= (digits-only, XSS-safe),
+     display text escaped like everything else. */
+  function callLinkHtml() {
+    var href = 'tel:' + String(BIZ.phone).replace(/[^+\d]/g, '');
+    return '<a class="call-link" href="' + escapeHtml(href) + '">&#128222; Call ' + escapeHtml(BIZ.phone) + '</a>';
+  }
+
   /* word-start keyword match (proven standard, 2026-10-03): "foreclosure" must not
      trip a "close" keyword, "recall" must not trip "call". Prefix keywords like
      'schedul'/'valu'/'relocat' still match; phrases keep word-start match. */
@@ -415,7 +427,8 @@
         escapeHtml(S.booking.day) + ' at <b>' + escapeHtml(time) + '</b><br>Client: <b>' + escapeHtml(S.booking.name) + '</b><br>' +
         'Reference: <span class="ref">' + ref + '</span><br><br>';
       if (S.booking.phone) line += 'We\'ll text your reminder. ';
-      line += 'We&rsquo;ll confirm the meeting point the evening before. Anything else I can help with?';
+      line += 'We&rsquo;ll confirm the meeting point the evening before. Anything else I can help with?<br><br>' +
+        'Prefer to talk it through? ' + callLinkHtml();
       S.mode = 'idle'; S.step = 0;
       return say(line, [{ label: '&#8962; Our services' }, { label: '&#128336; Hours & location' }]);
     }
@@ -559,10 +572,10 @@
     if (has(t, 'price', 'cost', 'how much', 'expensive', 'cheap', '$$')) return say('Honest numbers: typical total commission <b>5&ndash;6%</b> (negotiable), and our <b>4.5% full-service listing plan</b> covers staging advice, photography and negotiation. Valuations and buyer consults are <b>free</b>. &#129309;', [{ label: '&#8962; Our services' }]);
     if (has(t, 'hour', 'open', 'close', 'when do you', 'what time')) return say(hoursHtml(), [{ label: '&#128197; Book a home tour' }]);
     if (has(t, 'where', 'address', 'location', 'direction', 'park', 'find you', 'office')) {
-      return say('Find us at <b>' + escapeHtml(BIZ.address) + '</b> &mdash; free parking out front. &#128205;<br><br>Call us anytime: <b>' + escapeHtml(BIZ.phone) + '</b>',
+      return say('Find us at <b>' + escapeHtml(BIZ.address) + '</b> &mdash; free parking out front. &#128205;<br><br>' + callLinkHtml() + ' &mdash; we&rsquo;re happy to help anytime.',
         [{ label: '&#128197; Book a home tour' }]);
     }
-    if (has(t, 'human', 'person', 'real person', 'call you', 'phone number', 'speak to', 'agent', 'realtor', 'broker')) return say('Of course &mdash; call us at <b>' + escapeHtml(BIZ.phone) + '</b> during open hours and a real human picks up. But honestly? I can handle <b>tours, valuations, and pricing</b> right here, even at 2 AM. &#128521;', defaultChips());
+    if (has(t, 'human', 'person', 'real person', 'call you', 'phone number', 'speak to', 'agent', 'realtor', 'broker')) return say('Of course &mdash; ' + callLinkHtml() + ' during open hours and a real human picks up. But honestly? I can handle <b>tours, valuations, and pricing</b> right here, even at 2 AM. &#128521;', defaultChips());
     if (has(t, 'thank', 'thanks', 'thx', 'great', 'awesome', 'perfect')) return say('Anytime! That&rsquo;s what I&rsquo;m here for. &#8962;', defaultChips());
     if (has(t, 'bye', 'goodbye', 'see you', 'later')) { S.mode = 'idle'; return say('Happy house hunting &mdash; see you soon at ' + escapeHtml(BIZ.name) + '! &#8962;'); }
     if (/\b(hi+|hello|hey+|hola|yo)\b/.test(t) || has(t, 'good morning', 'good evening')) return say('Hey hey! &#128075; What can I do for you &mdash; <b>listings</b>, <b>home values</b>, or shall I <b>book your home tour</b>?', defaultChips());

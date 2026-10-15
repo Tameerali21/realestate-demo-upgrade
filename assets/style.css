@@ -80,6 +80,11 @@ section{padding:64px 0}
 .info .card td{padding:7px 0;border-bottom:1px dashed var(--line)}
 .info .card td:last-child{text-align:right;font-weight:600}
 
+/* ---------- tap-to-call ---------- */
+.call-cta{margin-top:14px;font-size:15px}
+.call-link{font-weight:700;color:var(--brand);text-decoration:none;border-bottom:2px solid var(--brand-lt)}
+.call-link:hover{border-color:var(--brand)}
+
 /* ---------- footer ---------- */
 footer{background:var(--brand-dk);color:#cfe3d8;padding:44px 0 30px;font-size:14px}
 footer b{color:#fff}
