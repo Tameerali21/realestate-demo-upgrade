@@ -13,7 +13,7 @@ Part of the multi-niche demo factory (see `~/workspace/outreach/demo-links.md`).
 Sibling demos: `~/workspace/outreach/demo-dental/` (primary pattern reference),
 `~/workspace/outreach/demo-legal/` (most advanced example).
 
-## What it demonstrates (the 4 flows)
+## What it demonstrates (the 5 flows)
 
 1. **Buying / selling Q&A** — home valuation ("what's my home worth?" → free
    data-backed valuation), commissions/fees (typical 5–6%, negotiable + 4.5%
@@ -34,6 +34,15 @@ Sibling demos: `~/workspace/outreach/demo-dental/` (primary pattern reference),
    - **5 stars** → "Would you share that on Google?" + Google review button.
    - **1–4 stars** → "What could we do better?" → feedback captured (saved as a
      private lead) → "Our broker will personally follow up."
+5. **60-second buyer match quiz** *(pilots the voice agent's buyer-qualification
+   scope)* — tap "🧲 60-sec buyer quiz" (or type *quiz / match me / find my
+   home*): budget (chips + free text) → timeline → pre-approval ("Not yet"
+   offers the trusted-local-lender intro, matching the mortgage branch copy)
+   → name → phone (validated) → "✅ Quiz complete!" buyer-profile card.
+   Saves a `Buyer quiz — qualified lead` lead (source `buyer quiz`) with the
+   budget/timeline/pre-approval profile in the details — **no invented
+   listings, prices, or sold stats**: Sofia promises "matching listings +
+   off-market previews", never a fabricated home.
 
 Plus: graceful fallbacks for off-script input (never dead-ends), quick-reply
 chips, typing indicator with realistic delays, auto-open nudge after ~8s, and

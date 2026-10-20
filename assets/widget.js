@@ -151,10 +151,11 @@
 
   /* conversation state */
   var S = {
-    mode: 'idle',          // idle | booking | afterhours | review
+    mode: 'idle',          // idle | booking | afterhours | review | quiz
     step: 0,
     booking: {},
     ah: {},
+    quiz: {},
     lastTopic: null
   };
 
@@ -346,7 +347,8 @@
       { label: '&#8962; Our services' },
       { label: '&#128197; Book a home tour' },
       { label: '&#127769; After-hours demo' },
-      { label: '&#11088; Rate your experience' }
+      { label: '&#11088; Rate your experience' },
+      { label: '&#129512; 60-sec buyer quiz', value: 'quiz' }
     ];
   }
 
@@ -548,12 +550,112 @@
       [{ label: '&#128197; Book a home tour' }, { label: 'No thanks', value: 'no thanks' }]);
   }
 
+  /* ---------- 60-second buyer match quiz (buyer-qualification lead capture) ----------
+     Pilots the voice agent's buyer-qualification scope: budget / timeline / pre-approval.
+     HONESTY (hard rule): Sofia NEVER invents listing addresses, prices or sold stats —
+     the quiz promises "matching listings + off-market previews", never a fabricated home. */
+  var QUIZ_BUDGETS = ['Under $300K', '$300–500K', '$500–750K', '$750K+'];
+  var QUIZ_TIMELINES = ['ASAP', '1–3 months', '3–6 months', 'Just browsing'];
+  var QUIZ_PRE = [
+    { label: "Yes, I'm pre-approved", value: 'pre-approved' },
+    { label: 'Not yet — connect me', value: 'not yet' }
+  ];
+
+  function canonChoice(t, options) {
+    var tl = t.toLowerCase();
+    for (var i = 0; i < options.length; i++) {
+      if (tl === options[i].toLowerCase()) return options[i];
+    }
+    return t.trim().slice(0, 60); /* free text accepted, length-capped */
+  }
+
+  function startQuiz() {
+    S.mode = 'quiz'; S.step = 0; S.quiz = {};
+    return say('<b>&#129512; The 60-second buyer match quiz!</b><br><br>' +
+      'Three quick questions and I&rsquo;ll send you <b>matching listings plus off-market previews</b> that fit. No spam, no guesswork &mdash; just homes in your lane.<br><br>' +
+      '<b>First: what&rsquo;s your budget?</b>',
+      QUIZ_BUDGETS.map(function (b) { return { label: b }; }));
+  }
+
+  function quizStep(text) {
+    var t = text.trim();
+    var tl = t.toLowerCase();
+    if (S.step === 0) {
+      S.quiz.budget = canonChoice(t, QUIZ_BUDGETS); S.step = 1;
+      return say('Got it &mdash; <b>' + escapeHtml(S.quiz.budget) + '</b> it is. &#129512;<br><br><b>And your timeline?</b>',
+        QUIZ_TIMELINES.map(function (x) { return { label: x }; }));
+    }
+    if (S.step === 1) {
+      S.quiz.timeline = canonChoice(t, QUIZ_TIMELINES); S.step = 2;
+      return say('Noted! Last one &mdash; <b>are you pre-approved for a mortgage?</b><br>' +
+        '<i>Pre-approved buyers win bidding situations &mdash; it only takes about a day.</i>',
+        QUIZ_PRE);
+    }
+    if (S.step === 2) {
+      var wantsLender = has(tl, 'not yet', 'connect me', 'lender');
+      var isPre = (tl === 'pre-approved' || has(tl, 'yes', 'preapprov', 'approved'));
+      S.quiz.pre = wantsLender ? 'Not yet — lender intro requested' : (isPre ? 'Pre-approved' : t.slice(0, 60));
+      S.step = 3;
+      /* "not yet" keeps the pre-approval branch's lender-intro copy consistent */
+      if (wantsLender) {
+        return say('No problem at all! &#128176;<br><br>I&rsquo;ll have one of our <b>trusted local lenders</b> reach out &mdash; it takes about a day, costs nothing, and tells sellers you&rsquo;re serious.<br><br><b>What&rsquo;s your name</b> for the match list?');
+      }
+      return say('Love it &mdash; pre-approved buyers move fastest in this market. &#128176;<br><br><b>What&rsquo;s your name</b> for the match list?');
+    }
+    if (S.step === 3) {
+      if (t.length < 2 || t.length > 40) {
+        return say('And your <b>name</b> for the match list?');
+      }
+      S.quiz.name = t; S.step = 4;
+      return say('Thanks, ' + escapeHtml(cap(t.split(' ')[0])) + '! And the best <b>number</b> to send your matches to?');
+    }
+    if (S.step === 4) {
+      var digits = digitsOf(tl);
+      if (digits.length < 7) {
+        return say('Hmm, that doesn\'t look like a complete number &mdash; mind double-checking it? <i>(digits only is fine)</i>');
+      }
+      S.quiz.phone = t; S.step = 5;
+      return finishQuiz();
+    }
+  }
+
+  function finishQuiz() {
+    var q = S.quiz;
+    var lenderLine = /lender intro/.test(q.pre)
+      ? '<br><br>Plus your <b>lender intro</b> &mdash; a trusted local lender will reach out within a day.'
+      : '';
+    saveLead({
+      name: q.name,
+      phone: q.phone,
+      topic: 'Buyer quiz — qualified lead',
+      details: 'Budget ' + q.budget + ' · Timeline ' + q.timeline + ' · Pre-approval ' + q.pre,
+      source: 'buyer quiz'
+    });
+    S.mode = 'idle'; S.step = 0; S.quiz = {};
+    return sayMany([
+      { html: '<b>&#9989; Quiz complete!</b> &#129512;<br><br>Here&rsquo;s your buyer profile:' },
+      {
+        dash: [
+          ['Budget', q.budget],
+          ['Timeline', q.timeline],
+          ['Pre-approval', q.pre]
+        ]
+      },
+      {
+        html: '<b>' + escapeHtml(BIZ.host) + '</b> will send <b>matching listings + off-market previews</b> that fit your budget &mdash; straight to your phone.' + lenderLine +
+          '<br><br>See anything you like and we can <b>tour it same-day</b>. Anything else I can help with?',
+        chips: defaultChips()
+      }
+    ]);
+  }
+
   /* ---------- main router ---------- */
   function route(text) {
     var t = text.toLowerCase().trim();
 
     if (S.mode === 'booking') return bookingStep(text);
     if (S.mode === 'afterhours') return afterHoursStep(text);
+    if (S.mode === 'quiz') return quizStep(text);
     if (S.mode === 'review' && S.step === 1) return reviewStep(text);
 
     if (has(t, 'book', 'tour', 'appoint', 'schedul', 'showing', 'visit a', 'see a home', 'slot')) return startBooking();
@@ -565,6 +667,8 @@
     if (has(t, 'first-time', 'first time', 'first buyer', 'never bought')) return say('First home? Exciting &mdash; here&rsquo;s the playbook we walk every buyer through. &#127969;<br><br><b>1)</b> get <b>pre-approved</b> (we&rsquo;ll connect you with trusted local lenders &mdash; it takes a day), <b>2)</b> we tour homes <i>within</i> that budget, <b>3)</b> we write an offer that protects you (inspection + appraisal contingencies).<br><br>No dumb questions, ever. Want to book a tour and see what your budget buys?', [{ label: '&#128197; Book a home tour' }]);
     if (has(t, 'sell', 'listing my', 'list my home', 'list with')) return say('Selling? Here&rsquo;s how we do it: <b>staging advice + pro photography</b>, pricing from live market data (not guesswork), and negotiation that works every angle. &#128200;<br><br>First step is a free valuation &mdash; want me to start one?', [{ label: '&#128200; Free home valuation' }, { label: '&#128197; Book a home tour' }]);
     if (has(t, 'buy', 'looking for a home', 'want a house', 'need a house', 'house hunt', 'property')) return say('Let&rsquo;s find it. &#128269; Tell me roughly what you&rsquo;re after &mdash; <b>beds, budget, neighborhoods</b> &mdash; and I&rsquo;ll pull matching listings plus off-market previews.<br><br>Or skip the chat and <b>tour this week</b> &mdash; same-day showings available.', [{ label: '&#128197; Book a home tour' }]);
+    /* 60-sec buyer quiz: word-start keywords only ("find my home value" still hits the valuation branch above) */
+    if (has(t, 'quiz', 'match me', 'find my home', 'match quiz')) return startQuiz();
     if (has(t, 'open house', 'open-house')) return say('We run open houses <b>every Saturday 11 AM &ndash; 2 PM</b> across our active listings &mdash; no appointment needed. &#128682;<br><br>Want the list of this Saturday&rsquo;s opens, or prefer a <b>private tour</b> on your own schedule?', [{ label: '&#128197; Book a home tour' }]);
     if (has(t, 'relocat', 'moving to', 'move to', 'new in town', 'out of state')) return say('Welcome to ' + escapeHtml(BIZ.city) + ' &mdash; you picked a great town. &#128666;<br><br>For relocators we do <b>video tours</b>, neighborhood guides (schools, commute, lifestyle), and a landing plan before you ever pack a box. Plenty of our buyers purchase sight-unseen with full confidence.<br><br>Want to start with a video tour?', [{ label: '&#128197; Book a home tour' }]);
     if (has(t, 'service', 'offer', 'do you do', 'what do you', 'help with')) return say(servicesHtml(), [{ label: '&#128197; Book a home tour' }]);
