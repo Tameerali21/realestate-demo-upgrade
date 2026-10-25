@@ -348,7 +348,8 @@
       { label: '&#128197; Book a home tour' },
       { label: '&#127769; After-hours demo' },
       { label: '&#11088; Rate your experience' },
-      { label: '&#129512; 60-sec buyer quiz', value: 'quiz' }
+      { label: '&#129512; 60-sec buyer quiz', value: 'quiz' },
+      { label: '&#127968; 60-sec seller quiz', value: 'seller quiz' }
     ];
   }
 
@@ -649,6 +650,96 @@
     ]);
   }
 
+  /* ---------- 60-second seller match quiz (2026-10-25 nightly upgrade) ----------
+     Mirrors the buyer quiz for the other half of the niche. HONESTY (hard rule):
+     Sofia NEVER invents a home value, sale price or sold stat — the quiz promises
+     a FREE VALUATION (done properly, not guessed in chat) + a listing plan. */
+  var SELLER_TYPES = ['Single-family home', 'Condo', 'Townhouse', 'Land / lot'];
+  var SELLER_TIMELINES = ['ASAP', '1–3 months', '3–6 months', 'Just exploring'];
+  var SELLER_VAL = [
+    { label: 'Yes, I have one', value: 'valued' },
+    { label: 'Not yet — free valuation', value: 'not yet' }
+  ];
+
+  function startSellerQuiz() {
+    S.mode = 'sellerquiz'; S.step = 0; S.squiz = {};
+    return say('<b>&#127968; The 60-second seller match quiz!</b><br><br>' +
+      'Three quick questions and I&rsquo;ll build your <b>seller plan &mdash; free valuation, staging advice and listing strategy</b>. No invented numbers, ever &mdash; your home&rsquo;s value comes from a real valuation, not a guess.<br><br>' +
+      '<b>First: what are you selling?</b>',
+      SELLER_TYPES.map(function (x) { return { label: x }; }));
+  }
+
+  function sellerQuizStep(text) {
+    var t = text.trim();
+    var tl = t.toLowerCase();
+    if (S.step === 0) {
+      S.squiz.property = canonChoice(t, SELLER_TYPES); S.step = 1;
+      return say('Got it &mdash; <b>' + escapeHtml(S.squiz.property) + '</b> it is. &#127968;<br><br><b>And your timeline to sell?</b>',
+        SELLER_TIMELINES.map(function (x) { return { label: x }; }));
+    }
+    if (S.step === 1) {
+      S.squiz.timeline = canonChoice(t, SELLER_TIMELINES); S.step = 2;
+      return say('Noted! Last one &mdash; <b>have you had a valuation yet?</b><br>' +
+        '<i>A data-backed valuation is step one of every listing we take.</i>',
+        SELLER_VAL);
+    }
+    if (S.step === 2) {
+      var wantsVal = has(tl, 'not yet', 'free valuation');
+      var isValued = (tl === 'valued' || has(tl, 'yes', 'valued', 'already'));
+      S.squiz.valuation = wantsVal ? 'Not yet — free valuation requested' : (isValued ? 'Already valued' : t.slice(0, 60));
+      S.step = 3;
+      if (wantsVal) {
+        return say('Perfect &mdash; we&rsquo;ll do your <b>free valuation</b> first, from live market data (never a guess). &#128200;<br><br><b>What&rsquo;s your name</b> for the seller list?');
+      }
+      return say('Great &mdash; we&rsquo;ll build your listing plan around that valuation. &#128200;<br><br><b>What&rsquo;s your name</b> for the seller list?');
+    }
+    if (S.step === 3) {
+      if (t.length < 2 || t.length > 40) {
+        return say('And your <b>name</b> for the seller list?');
+      }
+      S.squiz.name = t; S.step = 4;
+      return say('Thanks, ' + escapeHtml(cap(t.split(' ')[0])) + '! And the best <b>number</b> to send your seller plan to?');
+    }
+    if (S.step === 4) {
+      var digits = digitsOf(tl);
+      if (digits.length < 7) {
+        return say('Hmm, that doesn\'t look like a complete number &mdash; mind double-checking it? <i>(digits only is fine)</i>');
+      }
+      S.squiz.phone = t; S.step = 5;
+      return finishSellerQuiz();
+    }
+  }
+
+  function finishSellerQuiz() {
+    var q = S.squiz;
+    var valLine = /free valuation requested/.test(q.valuation)
+      ? '<br><br>Plus your <b>free valuation</b> &mdash; priced from live market data, not guesswork.'
+      : '';
+    saveLead({
+      name: q.name,
+      phone: q.phone,
+      topic: 'Seller quiz — qualified lead',
+      details: 'Property ' + q.property + ' · Timeline ' + q.timeline + ' · Valuation ' + q.valuation,
+      source: 'seller quiz'
+    });
+    S.mode = 'idle'; S.step = 0; S.squiz = {};
+    return sayMany([
+      { html: '<b>&#9989; Quiz complete!</b> &#127968;<br><br>Here&rsquo;s your seller profile:' },
+      {
+        dash: [
+          ['Property', q.property],
+          ['Timeline', q.timeline],
+          ['Valuation', q.valuation]
+        ]
+      },
+      {
+        html: '<b>' + escapeHtml(BIZ.host) + '</b> will build your <b>seller plan &mdash; free valuation, staging advice, pro photography and negotiation</b> &mdash; and send it straight to your phone.' + valLine +
+          '<br><br>Ready when you are: we can <b>start the valuation this week</b>. Anything else I can help with?',
+        chips: defaultChips()
+      }
+    ]);
+  }
+
   /* ---------- main router ---------- */
   function route(text) {
     var t = text.toLowerCase().trim();
@@ -656,6 +747,10 @@
     if (S.mode === 'booking') return bookingStep(text);
     if (S.mode === 'afterhours') return afterHoursStep(text);
     if (S.mode === 'quiz') return quizStep(text);
+    if (S.mode === 'sellerquiz') return sellerQuizStep(text);
+    /* Seller-quiz trigger FIRST: 'seller'/'sell' prefixes would otherwise hijack
+       the chip value into the selling Q&A branch (the 2026-10-20 'buy' bug class) */
+    if (t === 'seller quiz' || has(t, 'seller quiz')) return startSellerQuiz();
     if (S.mode === 'review' && S.step === 1) return reviewStep(text);
 
     if (has(t, 'book', 'tour', 'appoint', 'schedul', 'showing', 'visit a', 'see a home', 'slot')) return startBooking();
@@ -665,7 +760,7 @@
     if (has(t, 'worth', 'valu', 'apprais', 'what is my home', 'what\'s my home', 'whats my home', 'estimate my home', 'how much is my house')) return say(valuationHtml(), [{ label: '&#128200; Start my valuation', value: 'after-hours demo' }, { label: '&#128197; Book a home tour' }]);
     if (has(t, 'commission', 'how much do you charge', 'your fee', 'your fees', 'what do you charge', 'cost to sell', 'listing fee', 'percent', '%')) return say(commissionHtml(), [{ label: '&#128197; Book a home tour' }, { label: '&#128200; Free home valuation' }]);
     if (has(t, 'first-time', 'first time', 'first buyer', 'never bought')) return say('First home? Exciting &mdash; here&rsquo;s the playbook we walk every buyer through. &#127969;<br><br><b>1)</b> get <b>pre-approved</b> (we&rsquo;ll connect you with trusted local lenders &mdash; it takes a day), <b>2)</b> we tour homes <i>within</i> that budget, <b>3)</b> we write an offer that protects you (inspection + appraisal contingencies).<br><br>No dumb questions, ever. Want to book a tour and see what your budget buys?', [{ label: '&#128197; Book a home tour' }]);
-    if (has(t, 'sell', 'listing my', 'list my home', 'list with')) return say('Selling? Here&rsquo;s how we do it: <b>staging advice + pro photography</b>, pricing from live market data (not guesswork), and negotiation that works every angle. &#128200;<br><br>First step is a free valuation &mdash; want me to start one?', [{ label: '&#128200; Free home valuation' }, { label: '&#128197; Book a home tour' }]);
+    if (has(t, 'sell', 'listing my', 'list my home', 'list with')) return say('Selling? Here&rsquo;s how we do it: <b>staging advice + pro photography</b>, pricing from live market data (not guesswork), and negotiation that works every angle. &#128200;<br><br>First step is a free valuation &mdash; want me to start one, or take the 60-second seller quiz?', [{ label: '&#128200; Free home valuation' }, { label: '&#127968; 60-sec seller quiz', value: 'seller quiz' }, { label: '&#128197; Book a home tour' }]);
     if (has(t, 'buy', 'looking for a home', 'want a house', 'need a house', 'house hunt', 'property')) return say('Let&rsquo;s find it. &#128269; Tell me roughly what you&rsquo;re after &mdash; <b>beds, budget, neighborhoods</b> &mdash; and I&rsquo;ll pull matching listings plus off-market previews.<br><br>Or skip the chat and <b>tour this week</b> &mdash; same-day showings available.', [{ label: '&#128197; Book a home tour' }]);
     /* 60-sec buyer quiz: word-start keywords only ("find my home value" still hits the valuation branch above) */
     if (has(t, 'quiz', 'match me', 'find my home', 'match quiz')) return startQuiz();
