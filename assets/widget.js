@@ -151,11 +151,12 @@
 
   /* conversation state */
   var S = {
-    mode: 'idle',          // idle | booking | afterhours | review | quiz
+    mode: 'idle',          // idle | booking | afterhours | review | quiz | sellerquiz | prepquiz
     step: 0,
     booking: {},
     ah: {},
     quiz: {},
+    prepquiz: {},
     lastTopic: null
   };
 
@@ -349,7 +350,8 @@
       { label: '&#127769; After-hours demo' },
       { label: '&#11088; Rate your experience' },
       { label: '&#129512; 60-sec buyer quiz', value: 'quiz' },
-      { label: '&#127968; 60-sec seller quiz', value: 'seller quiz' }
+      { label: '&#127968; 60-sec seller quiz', value: 'seller quiz' },
+      { label: '&#128203; 60-sec consult-prep quiz', value: 'prep quiz' }
     ];
   }
 
@@ -740,6 +742,84 @@
     ]);
   }
 
+  /* ---------- 60-second consult-prep quiz (2026-10-31 nightly upgrade, gym/salon pattern) ----------
+     Mirrors the buyer/seller quizzes for the consultation itself. HONESTY (hard rule):
+     Sofia NEVER invents home values, prices, sold stats, outcomes or availability —
+     the quiz promises a personalized consultation plan built around the visitor's
+     priority, plus what to bring to the consultation, nothing more.
+     ROUTER AUDIT 2026-10-31: the chip value 'prep quiz' contains 'quiz', so the
+     buyer quiz's word-start 'quiz' match (below) WOULD hijack it, and the
+     seller trigger sits above the buyer trigger — hence the prep trigger sits
+     BEFORE both. Audit of every branch above it: only mode dispatches sit above
+     (booking/afterhours/quiz/sellerquiz, all mode-gated, so an idle 'prep quiz'
+     cannot trip them), and — unlike gym — this demo has NO 'consult' booking
+     keyword anywhere in the router, so no 'consult' hijack exists to guard
+     against. Bare 'prep' alone triggers nothing (no branch matches it). */
+  var PREP_PRIORS = ['Never worked with an agent', 'Bought or sold before', 'Investor / repeat client'];
+  var PREP_PRIORITIES = ['Best price', 'Fastest move', 'Right neighborhood', 'Low-stress process'];
+
+  function startPrepQuiz() {
+    S.mode = 'prepquiz'; S.step = 0; S.prepquiz = {};
+    return say('<b>&#128203; The 60-second consult-prep quiz!</b><br><br>' +
+      'Two quick questions and I&rsquo;ll build your <b>consult-prep profile</b> &mdash; then ' + escapeHtml(BIZ.host) + ' puts together a <b>personalized consultation plan</b> built around what matters most to you, plus what to bring to your consultation. No spam, no guesswork.<br><br>' +
+      '<b>First: have you worked with an agent before?</b>',
+      PREP_PRIORS.map(function (c) { return { label: c }; }));
+  }
+
+  function prepQuizStep(text) {
+    var t = text.trim();
+    if (S.step === 0) {
+      S.prepquiz.prior = canonChoice(t, PREP_PRIORS); S.step = 1;
+      return say('Got it &mdash; <b>' + escapeHtml(S.prepquiz.prior) + '</b>. &#128203;<br><br><b>What matters most</b> for your move?',
+        PREP_PRIORITIES.map(function (x) { return { label: x }; }));
+    }
+    if (S.step === 1) {
+      S.prepquiz.priority = canonChoice(t, PREP_PRIORITIES); S.step = 2;
+      return say('Noted &mdash; <b>' + escapeHtml(S.prepquiz.priority) + '</b> it is. &#128203;<br><br><b>What&rsquo;s your name</b> for the consult-prep profile?');
+    }
+    if (S.step === 2) {
+      if (t.length < 2 || t.length > 40) {
+        return say('And your <b>name</b> for the consult-prep profile?');
+      }
+      S.prepquiz.name = t; S.step = 3;
+      return say('Thanks, ' + escapeHtml(cap(t.split(' ')[0])) + '! And the best <b>number</b> to send your consultation plan to?');
+    }
+    if (S.step === 3) {
+      var digits = digitsOf(t);
+      if (digits.length < 7) {
+        return say('Hmm, that doesn\'t look like a complete number &mdash; mind double-checking it? <i>(digits only is fine)</i>');
+      }
+      S.prepquiz.phone = t;
+      return finishPrepQuiz();
+    }
+  }
+
+  function finishPrepQuiz() {
+    var q = S.prepquiz;
+    saveLead({
+      name: q.name,
+      phone: q.phone,
+      topic: 'Consult-prep quiz — qualified lead',
+      details: 'Prior ' + q.prior + ' · Priority ' + q.priority,
+      source: 'consult-prep quiz'
+    });
+    S.mode = 'idle'; S.step = 0; S.prepquiz = {};
+    return sayMany([
+      { html: '<b>&#9989; Quiz complete!</b> &#128203;<br><br>Here&rsquo;s your consult-prep profile:' },
+      {
+        dash: [
+          ['Prior', q.prior],
+          ['Priority', q.priority]
+        ]
+      },
+      {
+        html: '<b>' + escapeHtml(BIZ.host) + '</b> will put together your <b>personalized consultation plan</b> built around <b>' + escapeHtml(q.priority) + '</b> and send it to your number &mdash; plus what to bring to your consultation (a note of your must-haves, your timeline, and your questions), so your first meeting is all signal, no guesswork. ' +
+          'No invented promises here &mdash; your plan is built around your priority, and the consultation itself is where ' + escapeHtml(BIZ.host) + ' confirms the details with you. Anything else I can help with?',
+        chips: defaultChips()
+      }
+    ]);
+  }
+
   /* ---------- main router ---------- */
   function route(text) {
     var t = text.toLowerCase().trim();
@@ -748,7 +828,12 @@
     if (S.mode === 'afterhours') return afterHoursStep(text);
     if (S.mode === 'quiz') return quizStep(text);
     if (S.mode === 'sellerquiz') return sellerQuizStep(text);
-    /* Seller-quiz trigger FIRST: 'seller'/'sell' prefixes would otherwise hijack
+    if (S.mode === 'prepquiz') return prepQuizStep(text);
+    /* 60-sec consult-prep quiz trigger FIRST (see audit above): before the
+       seller-quiz trigger AND before the buyer quiz's word-start 'quiz' match,
+       which would otherwise hijack the 'prep quiz' chip value. */
+    if (has(t, 'prep quiz', 'consult prep quiz', 'consultation prep quiz', 'consult-prep quiz')) return startPrepQuiz();
+    /* Seller-quiz trigger: 'seller'/'sell' prefixes would otherwise hijack
        the chip value into the selling Q&A branch (the 2026-10-20 'buy' bug class) */
     if (t === 'seller quiz' || has(t, 'seller quiz')) return startSellerQuiz();
     if (S.mode === 'review' && S.step === 1) return reviewStep(text);
