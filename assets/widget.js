@@ -151,12 +151,13 @@
 
   /* conversation state */
   var S = {
-    mode: 'idle',          // idle | booking | afterhours | review | quiz | sellerquiz | prepquiz
+    mode: 'idle',          // idle | booking | afterhours | review | quiz | sellerquiz | prepquiz | relocquiz
     step: 0,
     booking: {},
     ah: {},
     quiz: {},
     prepquiz: {},
+    relocquiz: {},
     lastTopic: null
   };
 
@@ -351,7 +352,8 @@
       { label: '&#11088; Rate your experience' },
       { label: '&#129512; 60-sec buyer quiz', value: 'quiz' },
       { label: '&#127968; 60-sec seller quiz', value: 'seller quiz' },
-      { label: '&#128203; 60-sec consult-prep quiz', value: 'prep quiz' }
+      { label: '&#128203; 60-sec consult-prep quiz', value: 'prep quiz' },
+      { label: '&#128666; 60-sec relocation quiz', value: 'relocation quiz' }
     ];
   }
 
@@ -820,6 +822,84 @@
     ]);
   }
 
+  /* ---------- 60-second relocation quiz (2026-11-05 nightly upgrade, hotel 4th-quiz pattern) ----------
+     Second demo with a fourth quiz (hotel got the first on 2026-11-05 13:00).
+     HONESTY (hard rule): Sofia NEVER invents home values, prices, sold stats,
+     outcomes or availability — the quiz promises a personalized relocation plan
+     + neighborhood guide + video tours built around the visitor's situation and
+     timeline, and the agent confirms the actual tour on the call, nothing more.
+     ROUTER AUDIT 2026-11-05: the chip value 'relocation quiz' contains 'quiz',
+     so the buyer quiz's word-start 'quiz' match would hijack it, and the
+     'relocat' relocation service branch would ALSO hijack it (the 2026-10-20
+     'buy' bug class) — hence the reloc trigger sits FIRST, before the prep
+     trigger. Bare 'relocation' still reaches the relocation branch (the trigger
+     needs the full 'relocation quiz' phrase); bare 'quiz' still starts the
+     buyer quiz; bare 'relocat' triggers nothing new. */
+  var RELOC_SITUATIONS = ['Relocating for work', 'Moving closer to family', 'Upsizing my home', 'Downsizing my home'];
+  var RELOC_TIMELINES = ['This month', '1–3 months', '3–6 months', 'Just exploring'];
+
+  function startRelocQuiz() {
+    S.mode = 'relocquiz'; S.step = 0; S.relocquiz = {};
+    return say('<b>&#128666; The 60-second relocation quiz!</b><br><br>' +
+      'Two quick questions and I&rsquo;ll build your <b>relocation profile</b> &mdash; then ' + escapeHtml(BIZ.host) + ' puts together a <b>personalized relocation plan</b> built around your move: a neighborhood guide, video tours, and a landing plan before you ever pack a box. No spam, no guesswork.<br><br>' +
+      '<b>First: what&rsquo;s bringing you to ' + escapeHtml(BIZ.city) + '?</b>',
+      RELOC_SITUATIONS.map(function (c) { return { label: c }; }));
+  }
+
+  function relocQuizStep(text) {
+    var t = text.trim();
+    if (S.step === 0) {
+      S.relocquiz.situation = canonChoice(t, RELOC_SITUATIONS); S.step = 1;
+      return say('Got it &mdash; <b>' + escapeHtml(S.relocquiz.situation) + '</b>. &#128666;<br><br><b>And your timeline to move?</b>',
+        RELOC_TIMELINES.map(function (x) { return { label: x }; }));
+    }
+    if (S.step === 1) {
+      S.relocquiz.timeline = canonChoice(t, RELOC_TIMELINES); S.step = 2;
+      return say('Noted &mdash; <b>' + escapeHtml(S.relocquiz.timeline) + '</b> it is. &#128666;<br><br><b>What&rsquo;s your name</b> for the relocation profile?');
+    }
+    if (S.step === 2) {
+      if (t.length < 2 || t.length > 40) {
+        return say('And your <b>name</b> for the relocation profile?');
+      }
+      S.relocquiz.name = t; S.step = 3;
+      return say('Thanks, ' + escapeHtml(cap(t.split(' ')[0])) + '! And the best <b>number</b> to send your relocation plan to?');
+    }
+    if (S.step === 3) {
+      var digits = digitsOf(t);
+      if (digits.length < 7) {
+        return say('Hmm, that doesn\'t look like a complete number &mdash; mind double-checking it? <i>(digits only is fine)</i>');
+      }
+      S.relocquiz.phone = t;
+      return finishRelocQuiz();
+    }
+  }
+
+  function finishRelocQuiz() {
+    var q = S.relocquiz;
+    saveLead({
+      name: q.name,
+      phone: q.phone,
+      topic: 'Relocation quiz — qualified lead',
+      details: 'Situation ' + q.situation + ' · Timeline ' + q.timeline,
+      source: 'relocation quiz'
+    });
+    S.mode = 'idle'; S.step = 0; S.relocquiz = {};
+    return sayMany([
+      { html: '<b>&#9989; Quiz complete!</b> &#128666;<br><br>Here&rsquo;s your relocation profile:' },
+      {
+        dash: [
+          ['Situation', q.situation],
+          ['Timeline', q.timeline]
+        ]
+      },
+      {
+        html: '<b>' + escapeHtml(BIZ.host) + '</b> will put together your <b>personalized relocation plan</b> built around <b>' + escapeHtml(q.situation) + '</b> &mdash; a neighborhood guide for ' + escapeHtml(BIZ.city) + ', video tours of homes in your lane, and a landing plan before you pack a box &mdash; and send it to your number. ' +
+          'No invented promises here &mdash; your plan is built around your move, and the agent confirms the actual tour with you on the call. Anything else I can help with?',
+        chips: defaultChips()
+      }
+    ]);
+  }
+
   /* ---------- main router ---------- */
   function route(text) {
     var t = text.toLowerCase().trim();
@@ -829,6 +909,12 @@
     if (S.mode === 'quiz') return quizStep(text);
     if (S.mode === 'sellerquiz') return sellerQuizStep(text);
     if (S.mode === 'prepquiz') return prepQuizStep(text);
+    if (S.mode === 'relocquiz') return relocQuizStep(text);
+    /* 60-sec relocation quiz trigger FIRST (see audit above): before the
+       prep-quiz trigger AND the buyer quiz's word-start 'quiz' match AND the
+       'relocat' relocation service branch, all of which would otherwise
+       hijack the 'relocation quiz' chip value. */
+    if (has(t, 'relocation quiz', 'relocate quiz', 'relocation-quiz')) return startRelocQuiz();
     /* 60-sec consult-prep quiz trigger FIRST (see audit above): before the
        seller-quiz trigger AND before the buyer quiz's word-start 'quiz' match,
        which would otherwise hijack the 'prep quiz' chip value. */
