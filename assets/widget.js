@@ -151,13 +151,14 @@
 
   /* conversation state */
   var S = {
-    mode: 'idle',          // idle | booking | afterhours | review | quiz | sellerquiz | prepquiz | relocquiz
+    mode: 'idle',          // idle | booking | afterhours | review | quiz | sellerquiz | prepquiz | relocquiz | investquiz
     step: 0,
     booking: {},
     ah: {},
     quiz: {},
     prepquiz: {},
     relocquiz: {},
+    investquiz: {},
     lastTopic: null
   };
 
@@ -353,7 +354,8 @@
       { label: '&#129512; 60-sec buyer quiz', value: 'quiz' },
       { label: '&#127968; 60-sec seller quiz', value: 'seller quiz' },
       { label: '&#128203; 60-sec consult-prep quiz', value: 'prep quiz' },
-      { label: '&#128666; 60-sec relocation quiz', value: 'relocation quiz' }
+      { label: '&#128666; 60-sec relocation quiz', value: 'relocation quiz' },
+      { label: '&#128200; 60-sec investment quiz', value: 'investment quiz' }
     ];
   }
 
@@ -900,6 +902,86 @@
     ]);
   }
 
+  /* ---------- 60-second investment quiz (2026-11-10 nightly upgrade, hotel 5th-quiz pattern) ----------
+     Second demo with a fifth quiz (hotel got the first on 2026-11-10 13:10).
+     HONESTY (hard rule): Sofia NEVER invents prices, cap rates, ROI figures,
+     sold stats, availability, or guarantees — the quiz promises a personalized
+     investment plan built around the visitor's goal + budget, plus an exact
+     written market snapshot AT THE CONSULTATION, nothing more.
+     ROUTER AUDIT 2026-11-10: the chip value 'investment quiz' contains 'quiz',
+     so the buyer quiz's word-start 'quiz' match would hijack it (the 2026-10-20
+     'buy' bug class) — hence the invest trigger sits FIRST among quiz triggers,
+     before the relocation trigger. Audit of every other router branch: the only
+     'invest' string anywhere in this file is the prep-quiz Q1 chip label
+     'Investor / repeat client' (mode-gated chip, not a router keyword), so NO
+     branch matches 'invest'/'investment'/'investor' as a prefix — bare
+     'investment'/'investor' fall through to the graceful fallback (team-confirm),
+     never a quiz; bare 'quiz' still starts the buyer quiz. */
+  var INVEST_GOALS = ['Rental income', 'Fix & flip', 'Long-term appreciation', 'First investment'];
+  var INVEST_BUDGETS = ['Under $250K', '$250K–$500K', '$500K–$1M', '$1M+'];
+
+  function startInvestQuiz() {
+    S.mode = 'investquiz'; S.step = 0; S.investquiz = {};
+    return say('<b>&#128200; The 60-second investment quiz!</b><br><br>' +
+      'Two quick questions and I&rsquo;ll build your <b>investment profile</b> &mdash; then ' + escapeHtml(BIZ.host) + ' puts together a <b>personalized investment plan</b> built around your goal and budget, plus an exact written market snapshot at the consultation. No spam, no guesswork.<br><br>' +
+      '<b>First: what&rsquo;s your investment goal?</b>',
+      INVEST_GOALS.map(function (c) { return { label: c }; }));
+  }
+
+  function investQuizStep(text) {
+    var t = text.trim();
+    if (S.step === 0) {
+      S.investquiz.goal = canonChoice(t, INVEST_GOALS); S.step = 1;
+      return say('Got it &mdash; <b>' + escapeHtml(S.investquiz.goal) + '</b>. &#128200;<br><br><b>And your budget?</b>',
+        INVEST_BUDGETS.map(function (x) { return { label: x }; }));
+    }
+    if (S.step === 1) {
+      S.investquiz.budget = canonChoice(t, INVEST_BUDGETS); S.step = 2;
+      return say('Noted &mdash; <b>' + escapeHtml(S.investquiz.budget) + '</b> it is. &#128200;<br><br><b>What&rsquo;s your name</b> for the investment profile?');
+    }
+    if (S.step === 2) {
+      if (t.length < 2 || t.length > 40) {
+        return say('And your <b>name</b> for the investment profile?');
+      }
+      S.investquiz.name = t; S.step = 3;
+      return say('Thanks, ' + escapeHtml(cap(t.split(' ')[0])) + '! And the best <b>number</b> to send your investment plan to?');
+    }
+    if (S.step === 3) {
+      var digits = digitsOf(t);
+      if (digits.length < 7) {
+        return say('Hmm, that doesn\'t look like a complete number &mdash; mind double-checking it? <i>(digits only is fine)</i>');
+      }
+      S.investquiz.phone = t;
+      return finishInvestQuiz();
+    }
+  }
+
+  function finishInvestQuiz() {
+    var q = S.investquiz;
+    saveLead({
+      name: q.name,
+      phone: q.phone,
+      topic: 'Investment quiz — qualified lead',
+      details: 'Goal ' + q.goal + ' · Budget ' + q.budget,
+      source: 'investment quiz'
+    });
+    S.mode = 'idle'; S.step = 0; S.investquiz = {};
+    return sayMany([
+      { html: '<b>&#9989; Quiz complete!</b> &#128200;<br><br>Here&rsquo;s your investment profile:' },
+      {
+        dash: [
+          ['Goal', q.goal],
+          ['Budget', q.budget]
+        ]
+      },
+      {
+        html: '<b>' + escapeHtml(BIZ.host) + '</b> will put together your <b>personalized investment plan</b> built around <b>' + escapeHtml(q.goal) + '</b> and your <b>' + escapeHtml(q.budget) + '</b> budget &mdash; plus an exact written market snapshot at the consultation &mdash; and send it to your number. ' +
+          'No invented promises here &mdash; your plan is built around your goal and budget, and the consultation itself is where ' + escapeHtml(BIZ.host) + ' confirms the details with you. Anything else I can help with?',
+        chips: defaultChips()
+      }
+    ]);
+  }
+
   /* ---------- main router ---------- */
   function route(text) {
     var t = text.toLowerCase().trim();
@@ -910,6 +992,11 @@
     if (S.mode === 'sellerquiz') return sellerQuizStep(text);
     if (S.mode === 'prepquiz') return prepQuizStep(text);
     if (S.mode === 'relocquiz') return relocQuizStep(text);
+    if (S.mode === 'investquiz') return investQuizStep(text);
+    /* 60-sec investment quiz trigger FIRST among quiz triggers (see audit above):
+       before the relocation trigger AND the buyer quiz's word-start 'quiz' match,
+       which would otherwise hijack the 'investment quiz' chip value. */
+    if (has(t, 'investment quiz')) return startInvestQuiz();
     /* 60-sec relocation quiz trigger FIRST (see audit above): before the
        prep-quiz trigger AND the buyer quiz's word-start 'quiz' match AND the
        'relocat' relocation service branch, all of which would otherwise
