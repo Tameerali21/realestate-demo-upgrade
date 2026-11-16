@@ -151,7 +151,7 @@
 
   /* conversation state */
   var S = {
-    mode: 'idle',          // idle | booking | afterhours | review | quiz | sellerquiz | prepquiz | relocquiz | investquiz
+    mode: 'idle',          // idle | booking | afterhours | review | quiz | sellerquiz | prepquiz | relocquiz | investquiz | downsizingquiz
     step: 0,
     booking: {},
     ah: {},
@@ -159,6 +159,7 @@
     prepquiz: {},
     relocquiz: {},
     investquiz: {},
+    downsizingquiz: {},
     lastTopic: null
   };
 
@@ -355,7 +356,8 @@
       { label: '&#127968; 60-sec seller quiz', value: 'seller quiz' },
       { label: '&#128203; 60-sec consult-prep quiz', value: 'prep quiz' },
       { label: '&#128666; 60-sec relocation quiz', value: 'relocation quiz' },
-      { label: '&#128200; 60-sec investment quiz', value: 'investment quiz' }
+      { label: '&#128200; 60-sec investment quiz', value: 'investment quiz' },
+      { label: '&#127968; 60-sec downsizing quiz', value: 'downsizing quiz' }
     ];
   }
 
@@ -982,6 +984,87 @@
     ]);
   }
 
+  /* ---------- 60-second downsizing quiz (2026-11-16 nightly upgrade, hotel 6th-quiz pattern) ----------
+     First demo with a SIXTH quiz (hotel got the first on 2026-11-15).
+     HONESTY (hard rule): Sofia NEVER invents prices, home values, sold stats,
+     availability, or guarantees — the quiz promises a personalized downsizing
+     plan built around the visitor's home + timeline, plus a right-size home
+     search and an exact written market snapshot AT THE CONSULTATION, nothing more.
+     ROUTER AUDIT 2026-11-16: the chip value 'downsizing quiz' contains 'quiz',
+     so the buyer quiz's word-start 'quiz' match would hijack it (the 2026-10-20
+     'buy' bug class) — hence the downsizing trigger sits FIRST among quiz
+     triggers, before the relocation trigger AND the buyer quiz. The 'downsize
+     quiz' alias rides the same trigger. Audit of every other router branch: no
+     branch matches 'downsizing'/'downsize' as a prefix — bare 'downsizing' /
+     'downsize' fall through to the graceful fallback (team-confirm), never a
+     quiz; bare 'quiz' still starts the buyer quiz. Note the relocation quiz's
+     Q1 chip 'Downsizing my home' is a mode-gated chip (relocquiz mode only),
+     not a router keyword, so it cannot hijack the downsizing trigger. */
+  var DOWNSIZE_HOMES = ['Family home — kids moved out', 'Large home, too much upkeep', 'Condo or townhouse', 'Investment property to sell'];
+  var DOWNSIZE_TIMELINES = ['ASAP', '1–3 months', '3–6 months', 'Just exploring'];
+
+  function startDownsizingQuiz() {
+    S.mode = 'downsizingquiz'; S.step = 0; S.downsizingquiz = {};
+    return say('<b>&#127968; The 60-second downsizing quiz!</b><br><br>' +
+      'Two quick questions and I&rsquo;ll build your <b>downsizing profile</b> &mdash; then ' + escapeHtml(BIZ.host) + ' puts together a <b>personalized downsizing plan</b> built around your home and timeline &mdash; a right-size home search, plus an exact written market snapshot at the consultation. No spam, no guesswork.<br><br>' +
+      '<b>First: what does your current home look like?</b>',
+      DOWNSIZE_HOMES.map(function (c) { return { label: c }; }));
+  }
+
+  function downsizingQuizStep(text) {
+    var t = text.trim();
+    if (S.step === 0) {
+      S.downsizingquiz.home = canonChoice(t, DOWNSIZE_HOMES); S.step = 1;
+      return say('Got it &mdash; <b>' + escapeHtml(S.downsizingquiz.home) + '</b>. &#127968;<br><br><b>And your timeline to move?</b>',
+        DOWNSIZE_TIMELINES.map(function (x) { return { label: x }; }));
+    }
+    if (S.step === 1) {
+      S.downsizingquiz.timeline = canonChoice(t, DOWNSIZE_TIMELINES); S.step = 2;
+      return say('Noted &mdash; <b>' + escapeHtml(S.downsizingquiz.timeline) + '</b> it is. &#127968;<br><br><b>What&rsquo;s your name</b> for the downsizing profile?');
+    }
+    if (S.step === 2) {
+      if (t.length < 2 || t.length > 40) {
+        return say('And your <b>name</b> for the downsizing profile?');
+      }
+      S.downsizingquiz.name = t; S.step = 3;
+      return say('Thanks, ' + escapeHtml(cap(t.split(' ')[0])) + '! And the best <b>number</b> to send your downsizing plan to?');
+    }
+    if (S.step === 3) {
+      var digits = digitsOf(t);
+      if (digits.length < 7) {
+        return say('Hmm, that doesn\'t look like a complete number &mdash; mind double-checking it? <i>(digits only is fine)</i>');
+      }
+      S.downsizingquiz.phone = t;
+      return finishDownsizingQuiz();
+    }
+  }
+
+  function finishDownsizingQuiz() {
+    var q = S.downsizingquiz;
+    saveLead({
+      name: q.name,
+      phone: q.phone,
+      topic: 'Downsizing quiz — qualified lead',
+      details: 'Home ' + q.home + ' · Timeline ' + q.timeline,
+      source: 'downsizing quiz'
+    });
+    S.mode = 'idle'; S.step = 0; S.downsizingquiz = {};
+    return sayMany([
+      { html: '<b>&#9989; Quiz complete!</b> &#127968;<br><br>Here&rsquo;s your downsizing profile:' },
+      {
+        dash: [
+          ['Home', q.home],
+          ['Timeline', q.timeline]
+        ]
+      },
+      {
+        html: '<b>' + escapeHtml(BIZ.host) + '</b> will put together your <b>personalized downsizing plan</b> built around <b>' + escapeHtml(q.home) + '</b> and your <b>' + escapeHtml(q.timeline) + '</b> timeline &mdash; a right-size home search, plus an exact written market snapshot at the consultation &mdash; and send it to your number. ' +
+          'No invented promises here &mdash; your plan is built around your home and timeline, and the consultation itself is where ' + escapeHtml(BIZ.host) + ' confirms the details with you. Anything else I can help with?',
+        chips: defaultChips()
+      }
+    ]);
+  }
+
   /* ---------- main router ---------- */
   function route(text) {
     var t = text.toLowerCase().trim();
@@ -993,6 +1076,12 @@
     if (S.mode === 'prepquiz') return prepQuizStep(text);
     if (S.mode === 'relocquiz') return relocQuizStep(text);
     if (S.mode === 'investquiz') return investQuizStep(text);
+    if (S.mode === 'downsizingquiz') return downsizingQuizStep(text);
+    /* 60-sec downsizing quiz trigger FIRST among quiz triggers (see audit above):
+       before the investment trigger, the relocation trigger AND the buyer quiz's
+       word-start 'quiz' match, which would otherwise hijack the 'downsizing quiz'
+       chip value. The 'downsize quiz' alias rides the same trigger. */
+    if (has(t, 'downsizing quiz', 'downsize quiz')) return startDownsizingQuiz();
     /* 60-sec investment quiz trigger FIRST among quiz triggers (see audit above):
        before the relocation trigger AND the buyer quiz's word-start 'quiz' match,
        which would otherwise hijack the 'investment quiz' chip value. */
