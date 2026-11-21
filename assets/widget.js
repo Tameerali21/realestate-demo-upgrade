@@ -151,7 +151,7 @@
 
   /* conversation state */
   var S = {
-    mode: 'idle',          // idle | booking | afterhours | review | quiz | sellerquiz | prepquiz | relocquiz | investquiz | downsizingquiz
+    mode: 'idle',          // idle | booking | afterhours | review | quiz | sellerquiz | prepquiz | relocquiz | investquiz | downsizingquiz | luxuryquiz
     step: 0,
     booking: {},
     ah: {},
@@ -160,6 +160,7 @@
     relocquiz: {},
     investquiz: {},
     downsizingquiz: {},
+    luxuryquiz: {},
     lastTopic: null
   };
 
@@ -357,7 +358,8 @@
       { label: '&#128203; 60-sec consult-prep quiz', value: 'prep quiz' },
       { label: '&#128666; 60-sec relocation quiz', value: 'relocation quiz' },
       { label: '&#128200; 60-sec investment quiz', value: 'investment quiz' },
-      { label: '&#127968; 60-sec downsizing quiz', value: 'downsizing quiz' }
+      { label: '&#127968; 60-sec downsizing quiz', value: 'downsizing quiz' },
+      { label: '&#128081; 60-sec luxury quiz', value: 'luxury quiz' }
     ];
   }
 
@@ -1065,6 +1067,96 @@
     ]);
   }
 
+  /* ---------- 60-second luxury quiz (2026-11-21 nightly upgrade, med-spa 7th-quiz pattern) ----------
+     Second demo with a SEVENTH quiz (med-spa got the first on 2026-11-19).
+     HONESTY (hard rule): Sofia NEVER invents prices, home values, sold stats,
+     availability, or guarantees — the quiz promises a personalized luxury plan
+     built around the visitor's home type + priority, plus private previews and
+     an exact written market snapshot AT THE CONSULTATION, nothing more.
+     ROUTER AUDIT 2026-11-21: candidates were 'luxury quiz', 'mortgage quiz',
+     'rental quiz', 'valuation quiz', 'new-home quiz'. 'luxury quiz' is
+     cleanest: the word 'luxury' appears NOWHERE else in this file or the
+     landing page — no router keyword, no chip label, no copy — so no earlier
+     branch can match it and bare 'luxury' reaches the graceful fallback.
+     Rejected: 'mortgage quiz' ('mortgage' is a live info-branch keyword in the
+     pre-approval branch, and the buyer quiz already covers pre-approval);
+     'rental quiz' ('Rental income' is an investment-quiz Q1 chip, topical
+     overlap with the investment quiz); 'valuation quiz' ('valu' is a live
+     info-branch keyword, and the seller quiz already covers valuations);
+     'new-home quiz' (hyphenated chip value, topical overlap with the buyer
+     quiz). Note: as full 'X quiz' phrases, 'rental quiz' and 'new-home quiz'
+     fall into the buyer quiz's word-start 'quiz' catch-all (pre-existing
+     router behavior) — only their BARE keywords reach the graceful fallback.
+     The chip value 'luxury quiz' contains 'quiz', so the buyer quiz's
+     word-start 'quiz' match would hijack it (the 2026-10-20 'buy' bug class)
+     — hence the luxury trigger sits FIRST among quiz triggers, before the
+     downsizing trigger AND the buyer quiz. Bare 'quiz' still starts the buyer
+     quiz; bare 'luxury' / 'luxury home' reach the graceful fallback, never a quiz. */
+  var LUXURY_HOMES = ['Luxury estate', 'Penthouse', 'Waterfront home', 'Luxury condo'];
+  var LUXURY_PRIORITIES = ['Privacy & space', 'Prime location', 'Resort-style amenities', 'Investment value'];
+
+  function startLuxuryQuiz() {
+    S.mode = 'luxuryquiz'; S.step = 0; S.luxuryquiz = {};
+    return say('<b>&#128081; The 60-second luxury quiz!</b><br><br>' +
+      'Two quick questions and I&rsquo;ll build your <b>luxury profile</b> &mdash; then ' + escapeHtml(BIZ.host) + ' puts together a <b>personalized luxury plan</b> built around your home and what matters most to you &mdash; private previews, plus an exact written market snapshot at the consultation. No spam, no guesswork.<br><br>' +
+      '<b>First: what kind of luxury home are you dreaming of?</b>',
+      LUXURY_HOMES.map(function (c) { return { label: c }; }));
+  }
+
+  function luxuryQuizStep(text) {
+    var t = text.trim();
+    if (S.step === 0) {
+      S.luxuryquiz.home = canonChoice(t, LUXURY_HOMES); S.step = 1;
+      return say('Got it &mdash; <b>' + escapeHtml(S.luxuryquiz.home) + '</b>. &#128081;<br><br><b>What matters most</b> in your luxury home?',
+        LUXURY_PRIORITIES.map(function (x) { return { label: x }; }));
+    }
+    if (S.step === 1) {
+      S.luxuryquiz.priority = canonChoice(t, LUXURY_PRIORITIES); S.step = 2;
+      return say('Noted &mdash; <b>' + escapeHtml(S.luxuryquiz.priority) + '</b> it is. &#128081;<br><br><b>What&rsquo;s your name</b> for the luxury profile?');
+    }
+    if (S.step === 2) {
+      if (t.length < 2 || t.length > 40) {
+        return say('And your <b>name</b> for the luxury profile?');
+      }
+      S.luxuryquiz.name = t; S.step = 3;
+      return say('Thanks, ' + escapeHtml(cap(t.split(' ')[0])) + '! And the best <b>number</b> to send your luxury plan to?');
+    }
+    if (S.step === 3) {
+      var digits = digitsOf(t);
+      if (digits.length < 7) {
+        return say('Hmm, that doesn\'t look like a complete number &mdash; mind double-checking it? <i>(digits only is fine)</i>');
+      }
+      S.luxuryquiz.phone = t;
+      return finishLuxuryQuiz();
+    }
+  }
+
+  function finishLuxuryQuiz() {
+    var q = S.luxuryquiz;
+    saveLead({
+      name: q.name,
+      phone: q.phone,
+      topic: 'Luxury quiz — qualified lead',
+      details: 'Home ' + q.home + ' · Priority ' + q.priority,
+      source: 'luxury quiz'
+    });
+    S.mode = 'idle'; S.step = 0; S.luxuryquiz = {};
+    return sayMany([
+      { html: '<b>&#9989; Quiz complete!</b> &#128081;<br><br>Here&rsquo;s your luxury profile:' },
+      {
+        dash: [
+          ['Home', q.home],
+          ['Priority', q.priority]
+        ]
+      },
+      {
+        html: '<b>' + escapeHtml(BIZ.host) + '</b> will put together your <b>personalized luxury plan</b> built around <b>' + escapeHtml(q.home) + '</b> and your <b>' + escapeHtml(q.priority) + '</b> priority &mdash; private previews, plus an exact written market snapshot at the consultation &mdash; and send it to your number. ' +
+          'No invented promises here &mdash; your plan is built around your home and priority, and the consultation itself is where ' + escapeHtml(BIZ.host) + ' confirms the details with you. Anything else I can help with?',
+        chips: defaultChips()
+      }
+    ]);
+  }
+
   /* ---------- main router ---------- */
   function route(text) {
     var t = text.toLowerCase().trim();
@@ -1077,6 +1169,11 @@
     if (S.mode === 'relocquiz') return relocQuizStep(text);
     if (S.mode === 'investquiz') return investQuizStep(text);
     if (S.mode === 'downsizingquiz') return downsizingQuizStep(text);
+    if (S.mode === 'luxuryquiz') return luxuryQuizStep(text);
+    /* 60-sec luxury quiz trigger FIRST among quiz triggers (see audit above):
+       before the downsizing trigger AND the buyer quiz's word-start 'quiz'
+       match, which would otherwise hijack the 'luxury quiz' chip value. */
+    if (has(t, 'luxury quiz')) return startLuxuryQuiz();
     /* 60-sec downsizing quiz trigger FIRST among quiz triggers (see audit above):
        before the investment trigger, the relocation trigger AND the buyer quiz's
        word-start 'quiz' match, which would otherwise hijack the 'downsizing quiz'
